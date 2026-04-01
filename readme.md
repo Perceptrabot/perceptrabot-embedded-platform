@@ -21,4 +21,37 @@ If the wiring and pin definitions are correct the described values should match 
 
 
 
+# Arduino CLI
 
+documentation [link](https://arduino.github.io/arduino-cli/1.4/commands/arduino-cli/)
+
+installation:
+```bash
+mkdir -p ~/bin
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=~/bin sh
+
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+arduino-cli version
+```
+after the installation: 
+```bash
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+arduino-cli board list
+```
+
+check available connected boads:
+```
+arduino-cli borad list
+```
+
+compilation:
+```
+arduino-cli compile -b arduino:avr:uno /home/user/Arduino/MySketch
+```
+upload:
+```
+arduino-cli upload /home/user/Arduino/MySketch -p /dev/ttyACM0 -b arduino:avr:uno
+```
