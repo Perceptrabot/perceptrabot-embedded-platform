@@ -81,8 +81,8 @@ void readBattery() {
   float vBat = vMid * (R1 + R2) / R2;
   int pct = constrain((vBat - V_MIN) / (V_MAX - V_MIN) * 100, 0, 100);
 
-  Serial.print("V:"); Serial.print(vBat);
-  Serial.print(" PCT:"); Serial.println(pct);
+  Serial.print("V,"); Serial.println(vBat);
+  Serial.print(" PCT,"); Serial.println(pct);
 }
 
 

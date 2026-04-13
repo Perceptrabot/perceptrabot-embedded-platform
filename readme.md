@@ -55,3 +55,11 @@ upload:
 ```
 arduino-cli upload /home/user/Arduino/MySketch -p /dev/ttyACM0 -b arduino:avr:uno
 ```
+
+
+# code uploader script usage:
+
+```
+./arduino_upload.sh path/to/sketch.ino -p /dev/ttyACM0 -b arduino:avr:uno
+```
+-p and -b are optional with /dev/tty/ACM0 and arduino:avr:uno as defaults
