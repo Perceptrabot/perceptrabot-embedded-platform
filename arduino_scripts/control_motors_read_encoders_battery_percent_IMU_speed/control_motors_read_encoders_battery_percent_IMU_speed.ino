@@ -28,9 +28,28 @@ const int ENC_R_B = 11;
 const int ENC_L_A = 3;
 const int ENC_L_B = 12;
 
+// ===== PID =====
+
+float integralLeft  = 0.0;
+float integralRight = 0.0;
+float prevErrorLeft  = 0.0;
+float prevErrorRight = 0.0;
+
+
+// Tuning — start with just Kp, set Ki/Kd to 0
+const float Kp = 3.0;
+const float Ki = 0.5;
+const float Kd = 0.0;
+
+
+const int PWM_MIN = 50;   // below this motor doesn't move
+const int PWM_MAX = 255;
+
+
+
 // ===== Motor state =====
-int cmdLeft  = 0;  // -255..255
-int cmdRight = 0;  // -255..255
+float cmdLeft  = 0;  // -255..255
+float cmdRight = 0;  // -255..255
 
 // ===== Encoder counters (interrupt-based) =====
 volatile long encRight = 0;
@@ -41,6 +60,8 @@ const float WHEEL_CIRCUMFERENCE   = 0.0628; // meters
 const int   COUNTS_PER_REVOLUTION = 12; // encoder counts per wheel revolution
 const float METERS_PER_TICK_LEFT  = 1.0 / 6022.0;   // 0.00016606...
 const float METERS_PER_TICK_RIGHT = 1.0 / 5871.0;  // 0.00017035...
+const float MAX_SPEED = 0.217;
+
 
 float speedRight = 0.0;
 float speedLeft = 0.0;
@@ -114,14 +135,21 @@ void loop() {
   readSerialLines();
 
   // 2) Apply latest motor commands continuously
-  setLeft(cmdLeft);
-  setRight(cmdRight);
+  unsigned long lastControlLoop = 0;
+
+  now = millis();
+  if (now - lastControlLoop >= 20) {  // 50 Hz
+    lastControlLoop = now;
+    correct_speed_read_encoders(cmdLeft, cmdRight);  // see point 2
+  }
+  // setLeft(cmdLeft);
+  // setRight(cmdRight);
 
   // 3) Read sensors
   gyro.read();
   compass.read();
 
-  readSpeed();
+  // readSpeed();
 
   // Print at 50 Hz (every 20 ms)
   now = millis();
@@ -138,29 +166,84 @@ void loop() {
   
 }
 
+int speedToPWM(float mps) {
+  if (mps == 0.0) return 0;
+  float pwm = PWM_MIN + (abs(mps) / MAX_SPEED) * (120 - PWM_MIN);
+  pwm = constrain(pwm, PWM_MIN, 120);
+  return (mps > 0) ? (int)pwm : -(int)pwm;
+}
+
+void correct_speed_read_encoders(float cmdLeft, float cmdRight) {
+  
+  readSpeed();
+  float dt = dtSpeed / 1000.0;
+  if (dt <= 0) return;
+
+  // --- errors ---
+  float errorLeft  = cmdLeft  - speedLeft;
+  float errorRight = cmdRight - speedRight;
+
+  // --- integrals ---
+  integralLeft  += errorLeft  * dt;
+  integralRight += errorRight * dt;
+  integralLeft   = constrain(integralLeft,  -1.0, 1.0);
+  integralRight  = constrain(integralRight, -1.0, 1.0);
+
+  // --- derivatives ---
+  float derivLeft  = (errorLeft  - prevErrorLeft)  / dt;
+  float derivRight = (errorRight - prevErrorRight) / dt;
+
+  // --- save for next iteration ---
+  prevErrorLeft  = errorLeft;
+  prevErrorRight = errorRight;
+
+  // --- feedforward + PID correction ---
+  int ffLeft  = speedToPWM(cmdLeft);
+  int ffRight = speedToPWM(cmdRight);
+
+  int pwmLeft  = ffLeft  + (int)(Kp * errorLeft  + Ki * integralLeft  + Kd * derivLeft);
+  int pwmRight = ffRight + (int)(Kp * errorRight + Ki * integralRight + Kd * derivRight);
+
+  // --- apply ---
+  if (cmdLeft == 0.0)  { applyPWMLeft(0);  integralLeft  = 0; prevErrorLeft  = 0; }
+  else                 { applyPWMLeft(constrain(pwmLeft,   -180, 180)); }
+
+  if (cmdRight == 0.0) { applyPWMRight(0); integralRight = 0; prevErrorRight = 0; }
+  else                 { applyPWMRight(constrain(pwmRight, -180, 180)); }
+}
+
+
+
+void applyPWMRight(int pwm) {  // pwm: -255..255
+  pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
+  if (pwm > 0)       { digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); }
+  else if (pwm < 0)  { digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);  }
+  else               { digitalWrite(IN1, LOW);  digitalWrite(IN2, LOW);  }
+  analogWrite(ENA, abs(pwm));
+}
+
+void applyPWMLeft(int pwm) {
+  pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
+  if (pwm > 0)       { digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); }
+  else if (pwm < 0)  { digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);  }
+  else               { digitalWrite(IN3, LOW);  digitalWrite(IN4, LOW);  }
+  analogWrite(ENB, abs(pwm));
+}
+
 
 void readSpeed() {
-
-  dtSpeed = millis() - lastSpeedRead;  
+  dtSpeed = millis() - lastSpeedRead;
   lastSpeedRead = millis();
+
   noInterrupts();
-
-  long encRightCopy = encRight - encRightPrev;
-  long encLeftCopy  = encLeft - encLeftPrev;
-
+  long encRightDelta = encRight - encRightPrev;
+  long encLeftDelta  = encLeft  - encLeftPrev;
+  encRightPrev = encRight;   // move these INSIDE
+  encLeftPrev  = encLeft;
   interrupts();
 
-
-  speedRight = encRightCopy * METERS_PER_TICK_RIGHT/dtSpeed*1000.0;
-  speedLeft = encLeftCopy * METERS_PER_TICK_LEFT/dtSpeed*1000.0;
-
-  Serial.print("SPEED,");
-  Serial.print(speedLeft); Serial.print(",");
-  Serial.println(speedRight);
-
-  encRightPrev = encRight;
-  encLeftPrev = encLeft;
-
+  speedRight = encRightDelta * METERS_PER_TICK_RIGHT / dtSpeed * 1000.0;
+  speedLeft  = encLeftDelta  * METERS_PER_TICK_LEFT  / dtSpeed * 1000.0;
 }
 
 
@@ -200,8 +283,8 @@ void readBattery() {
 // leftForward:  IN3 LOW, IN4 HIGH
 // leftBackward: IN3 HIGH, IN4 LOW
 
-void setRight(int spd) { // -255..255
-  spd = constrain(spd, -255, 255);
+void setRight(float spd) { // -255..255
+  spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
   int pwm = abs(spd);
 
   if (spd > 0) {        // forward
@@ -217,8 +300,8 @@ void setRight(int spd) { // -255..255
   analogWrite(ENA, pwm);
 }
 
-void setLeft(int spd) { // -255..255
-  spd = constrain(spd, -255, 255);
+void setLeft(float spd) { // -255..255
+  spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
   int pwm = abs(spd);
 
   if (spd > 0) {        // forward
@@ -297,8 +380,8 @@ void handleCommand(const char* line) {
 
   // Parse: L <int>
   if (line[0] == 'L' && line[1] == ' ') {
-    int v = atoi(line + 2);
-    cmdLeft = constrain(v, -255, 255);
+    float v = atof(line + 2);
+    cmdLeft = constrain(v, -MAX_SPEED, MAX_SPEED);
 
     // Stay silent for zero commands to reduce serial traffic.
     if (cmdLeft != 0) {
@@ -310,8 +393,8 @@ void handleCommand(const char* line) {
 
   // Parse: R <int>
   if (line[0] == 'R' && line[1] == ' ') {
-    int v = atoi(line + 2);
-    cmdRight = constrain(v, -255, 255);
+    float v = atof(line + 2);
+    cmdRight = constrain(v, -MAX_SPEED, MAX_SPEED);
 
     // Stay silent for zero commands to reduce serial traffic.
     if (cmdRight != 0) {
@@ -324,13 +407,10 @@ void handleCommand(const char* line) {
   // Parse: LR <int> <int>
   if (line[0] == 'L' && line[1] == 'R' && line[2] == ' ') {
     const char* p = line + 3;
-    int l = atoi(p);
+    cmdLeft  = constrain(atof(p), -MAX_SPEED, MAX_SPEED);
     while (*p && *p != ' ') p++;
     while (*p == ' ') p++;
-    int r = atoi(p);
-
-    cmdLeft = constrain(l, -255, 255);
-    cmdRight = constrain(r, -255, 255);
+    cmdRight = constrain(atof(p), -MAX_SPEED, MAX_SPEED);
 
     // Stay silent if both commands are zero to reduce serial traffic.
     if (!(cmdLeft == 0 && cmdRight == 0)) {
