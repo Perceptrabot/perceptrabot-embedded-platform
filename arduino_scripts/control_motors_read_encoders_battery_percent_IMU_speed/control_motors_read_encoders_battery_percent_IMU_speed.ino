@@ -37,9 +37,9 @@ float prevErrorRight = 0.0;
 
 
 // Tuning — start with just Kp, set Ki/Kd to 0
-const float Kp = 3.0;
-const float Ki = 0.5;
-const float Kd = 0.0;
+const float Kp = 8.0;
+const float Ki = 1.0;
+const float Kd = 1.0;
 
 
 const int PWM_MIN = 50;   // below this motor doesn't move
@@ -205,11 +205,39 @@ void correct_speed_read_encoders(float cmdLeft, float cmdRight) {
   int pwmRight = ffRight + (int)(Kp * errorRight + Ki * integralRight + Kd * derivRight);
 
   // --- apply ---
-  if (cmdLeft == 0.0)  { applyPWMLeft(0);  integralLeft  = 0; prevErrorLeft  = 0; }
-  else                 { applyPWMLeft(constrain(pwmLeft,   -180, 180)); }
+  // if (cmdLeft == 0.0)  { applyPWMLeft(0);  integralLeft  = 0; prevErrorLeft  = 0; }
+  // else                 { applyPWMLeft(constrain(pwmLeft,   -180, 180)); }
 
-  if (cmdRight == 0.0) { applyPWMRight(0); integralRight = 0; prevErrorRight = 0; }
-  else                 { applyPWMRight(constrain(pwmRight, -180, 180)); }
+  // if (cmdRight == 0.0) { applyPWMRight(0); integralRight = 0; prevErrorRight = 0; }
+  // else                 { applyPWMRight(constrain(pwmRight, -180, 180)); }
+  const float STOP_THRESHOLD = 0.12;  // m/s — below this, consider "stopped"
+  const int   BRAKE_PWM      = 80;    // tune this — strength of brake pulse
+
+
+
+  if (cmdLeft == 0.0) {
+    integralLeft = 0; prevErrorLeft = 0;
+    if (abs(speedLeft) > STOP_THRESHOLD) {
+      applyPWMLeft(speedLeft > 0 ? -BRAKE_PWM : BRAKE_PWM);
+    } else {
+      applyPWMLeft(0);
+    }
+  } else {
+    applyPWMLeft(constrain(pwmLeft, -180, 180));
+  }
+
+  if (cmdRight == 0.0) {
+    integralRight = 0; prevErrorRight = 0;
+    if (abs(speedRight) > STOP_THRESHOLD) {
+      applyPWMRight(speedRight > 0 ? -BRAKE_PWM : BRAKE_PWM);
+    } else {
+      applyPWMRight(0);
+    }
+  } else {
+    applyPWMRight(constrain(pwmRight, -180, 180));
+  }
+
+
 }
 
 
@@ -283,39 +311,39 @@ void readBattery() {
 // leftForward:  IN3 LOW, IN4 HIGH
 // leftBackward: IN3 HIGH, IN4 LOW
 
-void setRight(float spd) { // -255..255
-  spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
-  int pwm = abs(spd);
+// void setRight(float spd) { // -255..255
+//   spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
+//   int pwm = abs(spd);
 
-  if (spd > 0) {        // forward
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, HIGH);
-  } else if (spd < 0) { // backward
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-  } else {
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, LOW);
-  }
-  analogWrite(ENA, pwm);
-}
+//   if (spd > 0) {        // forward
+//     digitalWrite(IN1, LOW);
+//     digitalWrite(IN2, HIGH);
+//   } else if (spd < 0) { // backward
+//     digitalWrite(IN1, HIGH);
+//     digitalWrite(IN2, LOW);
+//   } else {
+//     digitalWrite(IN1, LOW);
+//     digitalWrite(IN2, LOW);
+//   }
+//   analogWrite(ENA, pwm);
+// }
 
-void setLeft(float spd) { // -255..255
-  spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
-  int pwm = abs(spd);
+// void setLeft(float spd) { // -255..255
+//   spd = constrain(spd, -MAX_SPEED, MAX_SPEED);
+//   int pwm = abs(spd);
 
-  if (spd > 0) {        // forward
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, HIGH);
-  } else if (spd < 0) { // backward
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
-  } else {
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, LOW);
-  }
-  analogWrite(ENB, pwm);
-}
+//   if (spd > 0) {        // forward
+//     digitalWrite(IN3, LOW);
+//     digitalWrite(IN4, HIGH);
+//   } else if (spd < 0) { // backward
+//     digitalWrite(IN3, HIGH);
+//     digitalWrite(IN4, LOW);
+//   } else {
+//     digitalWrite(IN3, LOW);
+//     digitalWrite(IN4, LOW);
+//   }
+//   analogWrite(ENB, pwm);
+// }
 
 void stopAll() {
   cmdLeft = 0;
